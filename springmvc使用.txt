@@ -1,0 +1,244 @@
+1spring 日期处理
+
+接口参数createdate="2015-09-09"只能以字符串来传递日期参数
+在db中是以timestamp时间戳存储的
+通过@ResponseBody或者直接通过@ResController后，默认json串的日期为时间戳形式："createdate": "2012-06-04 15:35:39.0",
+
+1处理接收参数：用日期类型
+
+   方法一：
+   
+            在接收封装的dto里，加上注解方式：
+     @DateTimeFormat(pattern="yyyy-MM-dd")
+	 private Date createdate;
+              这样如果格式不符合，就会报错
+	 之前在cms项目中这样做的，ok
+	 在报表项目中报错typeMIsMatch 类型不匹配，后来加入jar  joda-time可以了
+              
+  方法二：
+  
+   还可以从controller这一层直接处理：
+    @InitBinder  
+2 public void initBinder(WebDataBinder binder) {  
+3 SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");  
+4 dateFormat.setLenient(false);  
+5 binder.registerCustomEditor(Date.class, new CustomDateEditor(dateFormat, true));   //true:允许输入空值，false:不能为空值
+  
+ 这样controller的所有方法，如果如何只当的日期类型，在注入参数时会通过参数名将string--映射为--日期时，做这个处理
+   此方式还可以通过配置实现：
+       <property name="webBindingInitializer">
+            <bean class="org.springframework.web.bind.support.ConfigurableWebBindingInitializer">
+                <property name="conversionService" ref="conService" />
+            </bean>
+        </property>
+    </bean>
+
+    <bean id="conService" class="org.springframework.format.support.DefaultFormattingConversionService"/>
+ 
+ 
+ 
+ 方法三：上面都是局部处理
+   全局配置一个日期类型的转换器
+   /**
+ * 全局日期处理类
+ * Convert<T,S>
+ *         泛型T:代表客户端提交的参数 String
+ *         泛型S:通过convert转换的类型
+   
+ */
+public class DateConvert implements Converter<String, Date> {
+
+    @Override
+    public Date convert(String stringDate) {
+        SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd");
+        try {
+            return simpleDateFormat.parse(stringDate);
+        } catch (ParseException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+}
+
+  配置这个类，由spring来管理：
+  <!-- 第三步：注册处理器映射器/处理器适配器 ，添加conversion-service属性-->
+    <mvc:annotation-driven conversion-service="conversionService"/>
+   
+    <!-- 第二步： 创建convertion-Service ，并注入dateConvert-->
+    <bean id="conversionService" class="org.springframework.format.support.FormattingConversionServiceFactoryBean">
+        <property name="converters">
+            <set>
+                <ref bean="dateConvert"/>
+            </set>
+        </property>
+    </bean>
+    <!-- 第一步:  创建自定义日期转换规则 -->   
+    <bean id="dateConvert" class="zpark.convert.DateConvert"/>
+    
+    
+ json格式的输出：日期字段
+ @ResponseBody直接会以时间戳返回，
+  普通的jSONObject方法返回的直接是将整个时间拆分的各个值组成
+ 
+ 如果采用局部处理，只需要在日期类型的getter方法上加上注解，来覆盖调默认的时间戳
+ @JsonFormat(pattern="yyyy-MM-dd")
+	public String getCreatedate() {
+		return createdate;
+	}
+此方法需要在<mvc:annotation-driven>里配置MappingJackson2HttpMessageConverter，然后再配合注解@JsonFormat才能起作用
+但是在spring2.5,这个<mvc:annotation-driven/>此标签是空标签不能添加内容，解决方法：
+1定义类：
+import org.codehaus.jackson.JsonGenerator;
+import org.codehaus.jackson.JsonProcessingException;  注意这里引入的是codehous的，和下面的注解要统一
+import org.codehaus.jackson.map.JsonSerializer;
+import org.codehaus.jackson.map.SerializerProvider;
+public class JsonTimeMapper extends JsonSerializer<Date> {  
+
+	 @Override 
+    public void serialize(Date value,   
+            JsonGenerator jsonGenerator,   
+            SerializerProvider provider)  
+            throws IOException, JsonProcessingException {  
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");  
+        jsonGenerator.writeString(sdf.format(value));  
+    }
+
+	
+}
+2：@JsonSerialize(using = JsonTimeMapper.class)  此注解来源于：codehous包
+	public Date getCreateTime() {
+		return createTime;
+	}
+	
+如果采用全局处理：参考文件：
+https://my.oschina.net/pwh19920920/blog/614066
+
+       spring+fastjson:
+       
+       第一种方案：纯注解式， 对日期类型的字段进行注解
+
+		@JSONField(format = "yyyy-MM-dd")
+		private Date updateDate;
+       第二种方案：使用fastjson的<value>WriteDateUseDateFormat</value>配置
+       <!-- 默认的注解映射的支持，org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping -->
+<mvc:annotation-driven content-negotiation-manager="contentNegotiationManager">
+   <mvc:message-converters register-defaults="true">
+      <!-- 将Jackson2HttpMessageConverter的默认格式化输出为true -->
+      <!-- 配置Fastjson支持 -->
+      <bean class="com.alibaba.fastjson.support.spring.FastJsonHttpMessageConverter">
+         <property name="supportedMediaTypes">
+            <list>
+               <value>text/html;charset=UTF-8</value>
+               <value>application/json</value>
+            </list>
+         </property>
+         <property name="features">
+            <list>
+               <!-- 输出key时是否使用双引号 -->
+               <value>QuoteFieldNames</value>
+               <!-- 是否输出值为null的字段 -->
+               <!-- <value>WriteMapNullValue</value> -->
+               <!-- 数值字段如果为null,输出为0,而非null -->
+               <value>WriteNullNumberAsZero</value>
+               <!-- List字段如果为null,输出为[],而非null -->
+               <value>WriteNullListAsEmpty</value>
+               <!-- 字符类型字段如果为null,输出为"",而非null -->
+               <value>WriteNullStringAsEmpty</value>
+               <!-- Boolean字段如果为null,输出为false,而非null -->
+               <value>WriteNullBooleanAsFalse</value>
+               <!-- null String不输出  -->
+               <value>WriteNullStringAsEmpty</value>
+               <!-- null String也要输出  -->
+               <!-- <value>WriteMapNullValue</value> -->
+               
+               <!-- Date的日期转换器 -->
+               <value>WriteDateUseDateFormat</value>
+            </list>
+         </property>
+      </bean>
+   </mvc:message-converters>
+</mvc:annotation-driven>
+
+
+3关于日期类型的数据传入sql
+ sql中可以直接写createdate="2015-09-09"  实际sql转为了2015-09-09 00：00：00时间戳
+  或者是直接传入日期类型   通过程序的方式
+  
+ 4xml 如何保留空节点  当对象的属性为空NULL时
+  NULL值不输出标签  默认转换器
+  
+  
+   <select id="detailCp" parameterType="java.lang.Integer" resultType="CpDetailVO">
+    select cp.Name as cpname,cp.CPCode as cpcode,cp.Address as address,
+    cp.IP as ip,cp.StatusID as statusid,cp.ContentProviderID as cpid,
+    EXTRACTVALUE(Contacts,'/CMSUserContentProvider/BusinessPhone1') as 'biz_person.phone',
+	EXTRACTVALUE(Contacts,'/CMSUserContentProvider/BusinessMobile1') as 'biz_person.mobile',
+	EXTRACTVALUE(Contacts,'/CMSUserContentProvider/BusinessName1') as 'biz_person.name',
+	EXTRACTVALUE(Contacts,'/CMSUserContentProvider/BusinessEmail1') as 'biz_person.email',
+	EXTRACTVALUE(Contacts,'/CMSUserContentProvider/TechnicalPhone1') as 'tech_person.phone',
+	EXTRACTVALUE(Contacts,'/CMSUserContentProvider/TechnicalMobile1') as 'tech_person.mobile',
+	EXTRACTVALUE(Contacts,'/CMSUserContentProvider/TechnicalName1') as 'tech_person.name',
+	EXTRACTVALUE(Contacts,'/CMSUserContentProvider/TechnicalEmail1') as 'tech_person.email',
+	
+	GROUP_CONCAT(CONCAT(sp.ContentProviderGroupID,'_',sp.Name)) AS spid_name
+	from contentproviderinfo cp
+	
+    left outer join contentprovidergroup cpsp on cp.ContentProviderID=cpsp.ContentProviderID
+    left outer join contentprovidergroupinfo sp on sp.ContentProviderGroupID=cpsp.ContentProviderGroupID
+    where  cp.ContentProviderID=#{cpid}
+  </select>
+  
+ 1bean级别验证 
+  
+ 2方法参数验证
+  @RequestParam(required=true)只能限制参数名必须有，但是值为null它不管
+  直接在参数前@NotNull Integer cpid  不起作用
+  參數校驗
+  正確：step1将bean放在xml中交由spring管理
+  <bean class="org.springframework.validation.beanvalidation.MethodValidationPostProcessor"/> 
+     step2在类上加上注解
+  @Validated  没有的话方法上的验证不起作用
+ public class SpCtrl {
+     step3 在方法上加验证
+   public  ResultVO updateStatus(@NotBlank String spids,@NotNull Integer statusid){
+   
+spring mvc 当有都个切面作用于同一个对象方法时，出现执行的顺序是不固定的
+通过在切面类上加上@Order(1)来规定先后，数值越小，优先级越高，越先执行
+持续关注excel的表头和数据内容的验证
+我参考github上一个示例D:\b\poi\poi-excel-utils
+实现excel各个列进行转换验证  先设置规则  即给定的模板类  （不可改变），再针对具体的
+导入文件进行验证 数据的正确性  主要用到的依赖poi
+<dependency>
+			<groupId>org.apache.poi</groupId>
+			<artifactId>poi-ooxml</artifactId>
+			<version>3.12</version>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.poi</groupId>
+			<artifactId>poi</artifactId>
+			<version>3.12</version>
+		</dependency>
+		<dependency>
+			<groupId>com.alibaba</groupId>
+			<artifactId>fastjson</artifactId>
+			<version>1.2.7</version>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework</groupId>
+			<artifactId>spring-beans</artifactId>
+			<version>4.2.2.RELEASE</version>
+		</dependency>
+
+
+javab和xsteam2种方式，可以实现java对象和json字符串的转换
+其中javab不需要额外引入jar包
+在使用上都是可以对其作出一些设置的：
+ 1是否包含xml头信息
+ 2是否进行格式化 增加换行 \r \n  另一种说法，即是否进行压缩
+ java--->json字符串   marshaller对象来完成
+ json-->java   unmarshller对象来负责完成
+ 我将两种转换和一些前置工作都已经放在了各自的工具类了
+ 只需要执行执行即可
+
+  

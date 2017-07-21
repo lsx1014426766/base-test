@@ -1,0 +1,12 @@
+RunWith注解改变JUnit的默认执行类，并实现自已的Listener在平时的单元测试，
+如果不使用RunWith注解，那么JUnit将会采用默认的执行类Suite执行
+
+JUnit允许用户指定其它的单元测试执行类，
+只需要我们的测试执行类继承类org.junit.runners.BlockJUnit4ClassRunner就可以了，
+Spring的执行类SpringJUnit4ClassRunner就是继承了该类
+
+为了保证数据库的干净，也为了保证测试数据的准确性与正确性，
+我们最好是在做测试之前插入我们自己准备的测试数据，
+然后在测试完成后，将数据删除掉，
+这时我们就可以通过增加一个Listener，来准备我们需要的测试数据，
+并和上面的事务管理相结合，就不会真正的提交到数据库中去了
